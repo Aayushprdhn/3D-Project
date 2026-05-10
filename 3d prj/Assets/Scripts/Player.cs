@@ -1,63 +1,73 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class Player : MonoBehaviour
 {
-    public Card heldCard;
+    [Header("Hold Point")]
     public Transform holdPoint;
 
-    public Text cardUIText;
+    [Header("Card Inspection UI")]
+    public GameObject  cardInfoPanel;
+    public Image        cardImageUI;
+    public TextMeshProUGUI nameText;
+    public TextMeshProUGUI deptText;
+    public TextMeshProUGUI idText;
+    public TextMeshProUGUI cardTypeText;
 
-    Card nearbyCard;
+    [Header("Pickup Prompt UI")]
+    public GameObject      pickupPrompt;
+    public TextMeshProUGUI pickupPromptText;
+
+    [Header("Drop Settings")]
+    public float dropForce = 2f;
+
+    [Header("Fade Settings")]
+    public float fadeDuration = 0.25f;
+
+    [HideInInspector] public Card heldCard;
+
+    private Card _nearbyCard;
+    private bool _uiVisible;
+    private CanvasGroup _panelCG;
+    private Coroutine _fadeRoutine;
+
+    void Start()
+    {
+        _panelCG = cardInfoPanel.GetComponent<CanvasGroup>();
+        if (_panelCG == null)
+            _panelCG = cardInfoPanel.AddComponent<CanvasGroup>();
+
+        cardInfoPanel.SetActive(false);
+        pickupPrompt.SetActive(false);
+
+        if (pickupPromptText != null)
+            pickupPromptText.text = "Press E to Pick Up";
+    }
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.E) && nearbyCard != null)
-        {
-            PickCard(nearbyCard);
-        }
+        if (Input.GetKeyDown(KeyCode.E) && _nearbyCard != null && heldCard == null)
+            PickCard(_nearbyCard);
 
         if (Input.GetKeyDown(KeyCode.F))
-        {
-            InspectCard();
-        }
+            ToggleCardUI();
 
-    
-    
+        if (Input.GetKeyDown(KeyCode.G) && heldCard != null)
+            DropCard();
     }
 
-    void InspectCard()
-    {
-        if (heldCard == null) return;
-
-        Debug.Log("CARD INFO: " + heldCard.cardText);
-    }
-
-    void OnTriggerEnter(Collider other)
-    {
-        if (other.CompareTag("Card"))
-        {
-            nearbyCard = other.GetComponent<Card>();
-        }
-    }
-
-    void OnTriggerExit(Collider other)
-    {
-        if (other.CompareTag("Card"))
-        {
-            nearbyCard = null;
-        }
-    }
+    // ── PICK / DROP ───────────────────────────
 
     void PickCard(Card card)
     {
-        if (heldCard != null) return;
-
         heldCard = card;
+        _nearbyCard = null;
 
         card.transform.SetParent(holdPoint);
-        card.transform.localPosition = new Vector3(0.1f, -0.1f, 0.2f);
-        card.transform.localRotation = Quaternion.Euler(0, 180, 0);
+        card.transform.localPosition = Vector3.zero;
+        card.transform.localRotation = Quaternion.identity;
 
         Rigidbody rb = card.GetComponent<Rigidbody>();
         if (rb != null)
@@ -66,9 +76,106 @@ public class Player : MonoBehaviour
             rb.useGravity = false;
         }
 
-        if (cardUIText != null)
+        pickupPrompt.SetActive(false);
+    }
+
+    void DropCard()
+    {
+        if (heldCard == null) return;
+        if (_uiVisible) CloseCardUI();
+
+        Card card = heldCard;
+        heldCard = null;
+
+        card.transform.SetParent(null);
+
+        Rigidbody rb = card.GetComponent<Rigidbody>();
+        if (rb != null)
         {
-            cardUIText.text = card.cardText;
+            rb.isKinematic = false;
+            rb.useGravity = true;
+            rb.AddForce(transform.forward * dropForce, ForceMode.Impulse);
         }
+    }
+
+    // ── UI SYSTEM ─────────────────────────────
+
+    void ToggleCardUI()
+    {
+        if (heldCard == null) return;
+
+        if (_uiVisible) CloseCardUI();
+        else OpenCardUI();
+    }
+
+    void OpenCardUI()
+    {
+        if (heldCard == null) return;
+
+        cardImageUI.sprite = heldCard.cardImage;
+
+        if (nameText != null) nameText.text = heldCard.cardHolderName;
+        if (deptText != null) deptText.text = heldCard.department;
+        if (idText != null) idText.text = heldCard.cardID;
+        if (cardTypeText != null) cardTypeText.text = heldCard.cardType;
+
+        cardInfoPanel.SetActive(true);
+        _uiVisible = true;
+
+        if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
+        _fadeRoutine = StartCoroutine(FadeCanvasGroup(_panelCG, 0f, 1f));
+    }
+
+    void CloseCardUI()
+    {
+        _uiVisible = false;
+
+        if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
+        _fadeRoutine = StartCoroutine(FadeAndHide());
+    }
+
+    IEnumerator FadeCanvasGroup(CanvasGroup cg, float from, float to)
+    {
+        float t = 0f;
+        cg.alpha = from;
+
+        while (t < fadeDuration)
+        {
+            t += Time.deltaTime;
+            cg.alpha = Mathf.Lerp(from, to, t / fadeDuration);
+            yield return null;
+        }
+
+        cg.alpha = to;
+    }
+
+    IEnumerator FadeAndHide()
+    {
+        yield return StartCoroutine(FadeCanvasGroup(_panelCG, 1f, 0f));
+        cardInfoPanel.SetActive(false);
+    }
+
+    // ── DETECTION ─────────────────────────────
+
+    void OnTriggerEnter(Collider other)
+    {
+        if (!other.CompareTag("Card")) return;
+
+        Card card = other.GetComponent<Card>();
+        if (card == null || card == heldCard) return;
+
+        _nearbyCard = card;
+        pickupPrompt.SetActive(true);
+    }
+
+    void OnTriggerExit(Collider other)
+    {
+        if (!other.CompareTag("Card")) return;
+
+        Card card = other.GetComponent<Card>();
+        if (card == null || card != _nearbyCard) return;
+
+        _nearbyCard = null;
+        pickupPrompt.SetActive(false);
     }
 }
